@@ -41,7 +41,7 @@ using namespace std;
 
 //Create a NetworkRequestChannel based on the given socket
  NetworkRequestChannel::NetworkRequestChannel(int socket){
-	 sock = socket;
+    sock = socket;
  }
 
 //client
@@ -120,15 +120,23 @@ const int MAX_MESSAGE = 255;
 
 string NetworkRequestChannel::send_request(string _request) 
 {
-	
+    send(sock, _request.c_str(), _request.size(), 0);
+    char buf[MAX_MESSAGE];
+    int numbytes = recv(sock, buf, MAX_MESSAGE-1, 0);
+    buf[numbytes] = '\0';
+	return buf;
 }
 
 string NetworkRequestChannel::cread() 
 {
-
+    char buf[MAX_MESSAGE];
+    int numbytes = recv(sock, buf, MAX_MESSAGE-1, 0);
+    buf[numbytes] = '\0';
+    return buf;
 }
 
 int NetworkRequestChannel::cwrite(string _msg) 
 {
-
+    int count = send(sock, _msg.c_str(), _msg.size(), 0);
+    return count;
 }

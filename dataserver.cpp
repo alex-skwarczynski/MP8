@@ -61,7 +61,7 @@ void process_data(NetworkRequestChannel & _channel, const string &  _request) {
 /*--------------------------------------------------------------------------*/
 
 void process_request(NetworkRequestChannel & _channel, const string & _request) {
-
+	// cout << "process request function" << endl;
 	if (_request.compare(0, 5, "hello") == 0) {
 		process_hello(_channel, _request);
 	}
@@ -76,18 +76,22 @@ void process_request(NetworkRequestChannel & _channel, const string & _request) 
 	else {
 		_channel.cwrite("unknown request");
 	}
-
+	// cout << "process request function end" << endl;
 }
 
 void handle_process_loop(NetworkRequestChannel & _channel) {
+	// cout << "handle process loop" << endl;
 	for(;;) {
-		string request = _channel.cread();
+		// cout << "reading" << endl;
+		string request = "";
+		request = _channel.cread();
 
 		if (request.compare("quit") == 0) {
 			_channel.cwrite("bye");
 			usleep(10000);          // give the other end a bit of time.
 			break;                  // break out of the loop;
 		}
+		// cout << "processing" << endl;
 		process_request(_channel, request);
 	}
 
@@ -97,8 +101,8 @@ void* connection_handler(void* sock)
 {
 	cout << "Connection handler start." << endl;
 	int s = (intptr_t) sock;
-	// NetworkRequestChannel dummy = NetworkRequestChannel(s);
-	// handle_process_loop(dummy);
+	NetworkRequestChannel dummy = NetworkRequestChannel(s);
+	handle_process_loop(dummy);
 	cout << "this is the connection handler for port: " << s << endl;
 }
 

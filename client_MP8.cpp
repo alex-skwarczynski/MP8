@@ -53,7 +53,9 @@
     semaphore.h and (if you choose) their corresponding .cpp files.
  */
 
-//#include "bounded_buffer.h"
+#include "SafeBuffer.h"
+#include <signal.h>
+
 
 /*--------------------------------------------------------------------------*/
 /* DATA STRUCTURES */
@@ -130,19 +132,99 @@ std::string make_histogram_table(std::string name1, std::string name2,
 /*
     You'll need to fill these in.
 */
+struct request_data
+{
+	std::string body;
+	int num;
+	SafeBuffer * request_buffer;
+};
 //request threads put requests to Bounded Buffer
 void* request_thread_function(void* arg) {
+    struct request_data *data;
+	data = (struct request_data *) arg;
+	std::string body = data->body;
+	int num = data->num;
+	SafeBuffer* request_buffer = data->request_buffer; 
 
+	for(int i = 0; i < num; i++) {
+		request_buffer->push_back(body);
+	}
 }
 
+struct worker_data
+{
+	SafeBuffer * request_buffer;
+	std::vector<int> *freq1;
+	std::vector<int> *freq2;
+    std::vector<int> *freq3;
+    std::string host;
+    unsigned short port;
+    NetworkRequestChannel *chan;
+};
 //Worker threads create channel to communicate with Server for the clients
 void* worker_thread_function(void* arg) {
+    struct worker_data *data;
+	data = (struct worker_data *) arg;
+	SafeBuffer* s_buffer = data->request_buffer;
+	std::vector<int> *fq1 = data->freq1;
+	std::vector<int> *fq2 = data->freq2;
+	std::vector<int> *fq3 = data->freq3;
+    std::string host = data->host;
+    unsigned short port = data->port;
+	NetworkRequestChannel *chan = data->chan;
 
+	// std::string s = chan->send_request("newthread");
+    NetworkRequestChannel *workerChannel = new NetworkRequestChannel(host, port);
+
+    while(true) {
+		std::string request = s_buffer->retrieve_front();
+        std::string response = workerChannel->send_request(request);
+
+        if(request == "data John Smith") {
+            fq1->at(stoi(response) / 10) += 1;
+        }
+        else if(request == "data Jane Smith") {
+            fq2->at(stoi(response) / 10) += 1;
+        }
+        else if(request == "data Joe Smith") {
+            fq3->at(stoi(response) / 10) += 1;
+        }
+       	else if(request == "quit") {
+            delete workerChannel;
+            break;
+        }
+    }
 }
 
 //Stat threads compute the results
 void* stat_thread_function(void* arg) {
 
+}
+
+struct signal_data {
+    std::vector<int> *freq1;
+	std::vector<int> *freq2;
+    std::vector<int> *freq3;
+    int w;
+    int n;
+};
+
+void signal_handler(int signum, siginfo_t *si, void * uc) {
+
+    struct signal_data *data;
+	data = (struct signal_data *) si->si_value.sival_ptr;
+	std::vector<int> *fq1 = data->freq1;
+	std::vector<int> *fq2 = data->freq2;
+	std::vector<int> *fq3 = data->freq3;
+	int n = data->n;
+    int w = data->w;
+    
+    system("clear");
+    std::string histogram_table = make_histogram_table("John Smith",
+		        "Jane Smith", "Joe Smith", fq1,
+		        fq2, fq3);
+
+    std::cout << histogram_table << std::endl;
 }
 
 /*--------------------------------------------------------------------------*/
@@ -201,5 +283,156 @@ int main(int argc, char * argv[]) {
     Do what you did in MP7, but remember we use NetworkReqChannel Here.
     */
 
-    NetworkRequestChannel *chan = new NetworkRequestChannel(host_name, port_no);
+    // NetworkRequestChannel *chan = new NetworkRequestChannel(host_name, port_no);
+    // std::cout << chan->send_request("hello") << endl;
+    // std::cout << chan->send_request("data") << endl;
+    // std::cout << chan->send_request("quit") << endl;
+
+    std::ofstream ofs;
+        if(USE_ALTERNATE_FILE_OUTPUT) ofs.open("output2.txt", std::ios::out | std::ios::app);
+        else ofs.open("output.txt", std::ios::out | std::ios::app);
+
+        std::cout << "n == " << n << std::endl;
+        std::cout << "b == " << b << std::endl;
+        std::cout << "w == " << w << std::endl;
+
+        std::cout << "CLIENT STARTED:" << std::endl;
+        std::cout << "Establishing control channel... " << std::flush;
+        NetworkRequestChannel *chan = new NetworkRequestChannel(host_name, port_no);
+        std::cout << "done." << std::endl;
+
+        /*
+        -----------------------------------------------------------------------------------------------------------------
+        */
+
+        SafeBuffer request_buffer(b);
+        std::vector<int> john_frequency_count(10, 0);
+        std::vector<int> jane_frequency_count(10, 0);
+        std::vector<int> joe_frequency_count(10, 0);
+
+        // Timer init and starting
+
+        timer_t timerid;
+        struct itimerspec its;
+        long long freq_nanosecs;
+        struct sigevent sev;
+        sigset_t mask;
+        struct sigaction sa;
+
+        sa.sa_flags = SA_SIGINFO;
+        sa.sa_sigaction = signal_handler;
+        sigemptyset(&sa.sa_mask);
+        sigaction(SIGALRM, &sa, NULL);
+
+        struct signal_data sig_data;
+        sig_data.n = n;
+        sig_data.w = w;
+        sig_data.freq1 = &john_frequency_count;
+        sig_data.freq2 = &jane_frequency_count;
+        sig_data.freq3 = &joe_frequency_count;
+
+        sev.sigev_value.sival_ptr = &sig_data;
+        sev.sigev_notify = SIGEV_SIGNAL;
+        sev.sigev_signo = SIGALRM;
+
+        timer_create(CLOCK_REALTIME, &sev, &timerid);
+
+        freq_nanosecs = 2000000000;
+        its.it_value.tv_sec = freq_nanosecs / 1000000000;
+        its.it_value.tv_nsec = freq_nanosecs % 1000000000;
+        its.it_interval.tv_sec = its.it_value.tv_sec;
+        its.it_interval.tv_nsec = its.it_value.tv_nsec;
+
+        timer_settime(timerid, 0, &its, NULL);
+
+        // Create consumer/producer
+
+        // std::cout << "Populating request buffer... ";
+        // fflush(NULL);
+
+		pthread_t request_threads[3];
+		struct request_data request_args[3];
+
+		request_args[0].body = "data John Smith";
+		request_args[1].body = "data Jane Smith";
+		request_args[2].body = "data Joe Smith";
+
+		for (int i = 0; i < 3; i++)
+		{
+			request_args[i].num = n;
+			request_args[i].request_buffer = &request_buffer;
+			pthread_create(&request_threads[i], NULL, 
+				request_thread_function, (void *)&request_args[i]);
+		}
+
+        // std::cout << "done." << std::endl;
+
+		/*-------------------------------------------*/
+		/* START TIMER HERE */
+		/*-------------------------------------------*/
+
+		uint64_t time_diff;
+		struct timespec start, end;
+
+		clock_gettime(CLOCK_MONOTONIC, &start);
+
+        pthread_t worker_threads[w];
+		struct worker_data worker_args[w];
+
+		for(int i = 0; i < w; i++)
+		{
+			worker_args[i].request_buffer = &request_buffer;
+			worker_args[i].freq1 = &john_frequency_count;
+			worker_args[i].freq2 = &jane_frequency_count;
+			worker_args[i].freq3 = &joe_frequency_count;
+			worker_args[i].chan = chan;
+            worker_args[i].host = host_name;
+            worker_args[i].port = port_no;
+			pthread_create(&worker_threads[i], NULL, 
+				worker_thread_function, (void *)&worker_args[i]);
+		}
+        for (int i = 0; i < 3; i++)
+		{
+			pthread_join(request_threads[i], NULL);
+		}
+
+        // std::cout << "Request threads completed" << std::endl;
+        for(int i = 0; i < w; ++i) {
+            request_buffer.push_back("quit");
+        }
+
+		for (int i = 0; i < w; i++)
+		{
+			pthread_join(worker_threads[i], NULL);
+		}
+
+        timer_delete(timerid);
+        system("clear");
+
+        std::cout << "Worker threads completed" << std::endl;
+
+		clock_gettime(CLOCK_MONOTONIC, &end);
+
+		time_diff = 1000000000L * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec;
+
+		std::cout << "Elapsed time: " << (unsigned long long) time_diff / 1000000L << " microseconds." << std::endl;
+
+        std::string histogram_table = make_histogram_table("John Smith",
+		        "Jane Smith", "Joe Smith", &john_frequency_count,
+		        &jane_frequency_count, &joe_frequency_count);
+
+        std::cout << "Results for n == " << n << ", w == " << w << std::endl;
+
+        std::cout << histogram_table << std::endl;
+
+
+        /*
+        -----------------------------------------------------------------------------------------------------------------
+        */
+
+        ofs.close();
+        std::cout << "Sleeping..." << std::endl;
+        usleep(10000);
+        std::string finale = chan->send_request("quit");
+        std::cout << "Finale: " << finale << std::endl;
 }
